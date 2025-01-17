@@ -1,7 +1,6 @@
 import win32clipboard
-from charset_normalizer import detect
 
-class ClipboardContext:
+class ClipboardHandler:
     def __enter__(self):
         win32clipboard.OpenClipboard()
         return self
@@ -11,83 +10,72 @@ class ClipboardContext:
         
     def enum(self, format):
         return win32clipboard.EnumClipboardFormats(format)
+    
+    def get_formats(self):
+        formats = []
+        format = 0
+        while (format := self.enum(format)):
+            formats.append(format)
+        return formats
+    
+    def get_formatname(self, format):
+        try:
+            return win32clipboard.GetClipboardFormatName(format)
+        except Exception:
+            return "standard_format"
+
+    def get_formatnames(self):
+        names = {}
+        for format in self.get_formats():
+            names[format] = self.get_formatname(format)
+        return names
 
     def get(self, format):
         return win32clipboard.GetClipboardData(format)
 
+    # Clip型には非対応
+    def get_all(self):
+        datas = {}
+        for format in self.get_formats():
+            datas[format] = self.get(format)
+        return datas
+
     def set(self, format, data):
         win32clipboard.SetClipboardData(format, data)
+
+    def set_all(self, datas):
+        for format, data in datas.items():
+            self.set(format, data)
 
     def clear(self):
         win32clipboard.EmptyClipboard()
         
-    def set_html(self):
-        win32clipboard.RegisterClipboardFormat("HTML Format")
+    def register_format(self, name):
+        return win32clipboard.RegisterClipboardFormat(name)
+        # return win32clipboard.RegisterClipboardFormat("HTML Format")
 
-
-
-class ExtBytes(bytes):
-    def __new__(cls, arg):
-        instance = super().__new__(cls, arg)
-        return instance
-
-    def __init__(self, arg):
-        self.encoding, self.confidence = self.pred_encode()
-
-    def replace(self, old, new, count=-1, varbose=False):
-        if isinstance(self, bytes):
-            if varbose:
-                print(f"encoding: {self.encoding}, confidence: {self.confidence}")
-            return ExtBytes(self.decode().replace(old, new, count).encode(self.encoding))
-        else:
-            raise TypeError("Unsupported data type for replace")
-    
-    def decode(self):
-        return super().decode(self.encoding)
-        
-    def pred_encode(self):
-        result = detect(self)
-        encoding = result["encoding"]
-        confidence = result["confidence"]
-
-        return encoding, confidence
-
-    def __repr__(self):
-        return super().__repr__()
-    
-    def __str__(self):
-        if self.encoding is None:
-            return super().__repr__()
-        else:
-            # return self.decode()
-            return f"=== encoding: {self.encoding}, confidence: {self.confidence}\n{self.decode()}"
-
-
-class NotionType(ExtBytes):
-    def pred_encode(self):
-        encoding = "utf-16-le"
-        confidence = 1
-        
-        return encoding, confidence
-        
 
 class Clip(dict):
     def __init__(self, datas=None, autofetch=True):
         super().__init__()
         if datas is None:
             if autofetch:
-                with ClipboardContext() as clipboard:
-                    format = 0
-                    while (format := clipboard.enum(format)):
+                with ClipboardHandler() as clipboard:
+                    for format in clipboard.get_formats():
                         self[format] = clipboard.get(format)
         else:
             self.update(datas)
             
+    def _set(self, clipboard, format):
+        clipboard.set(format, self[format])
+            
     def set_clipboard(self):
-        with ClipboardContext() as clipboard:
+        with ClipboardHandler() as clipboard:
             clipboard.clear()
-            for format, data in self.items():
-                clipboard.set(format, data)
+            for format in self.keys():
+                self._set(clipboard, format)
+            # for format, data in self.items():
+                # clipboard.set_all(self)
     
     def get_formats(self):
         return list(self.keys())
@@ -103,10 +91,5 @@ class Clip(dict):
             print(f"=== format: {format}")
             print(self[format])
             print()
+            
     
-    def __setitem__(self, key, value):
-        if key in range(49700, 49800):    # Notion
-            value = NotionType(value)
-        elif isinstance(value, bytes):
-            value = ExtBytes(value)
-        super().__setitem__(key, value)
