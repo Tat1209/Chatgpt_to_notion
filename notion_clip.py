@@ -50,46 +50,50 @@ class NotionType(ExtBytes):
 
 class HTMLType(ExtBytes):
     format_name = "HTML Format"
-    format_key = "Html_bin"
+    format_key = "HTML_bin"
 
 
 class NotionClip(Clip):
     def __init__(self, datas=None, autofetch=True):
-        self.trans_fr, trans_rf = self.make_trans()
+        self.type_list = [NotionType, HTMLType] # Notionみがあるのはここだけ 継承でもっと汎用的になるはず
+        self.trans_fr, self.trans_rf = self.make_trans()
         super().__init__(datas, autofetch)
-        converted_dict = {trans_rf[k]: v for k, v in self.items()}
-        self.clear()  # 既存のキーと値を削除
-        self.update(converted_dict)  # 変換後のキーと値を追加
-                
+        # converted_dict = {self.trans_rf[k]: v for k, v in self.items()}
+        # self.clear()  # 既存のキーと値を削除
+        # self.update(converted_dict)  # 変換後のキーと値を追加
+        # print("aaaaa")
+
     def make_trans(self):
         trans_fr = {}
         trans_rf = {}
         with ClipboardHandler() as ch:
             for key, value in ch.get_formatnames().items():
                 format_key = key
-                if value == NotionType.format_name:
-                    format_key = NotionType.format_key
-                elif value == HTMLType.format_name:
-                    format_key = HTMLType.format_key
+                for type_cls in self.type_list:
+                    if value == type_cls.format_name:
+                        format_key = type_cls.format_key
+                        break
                 trans_fr[format_key] = key
                 trans_rf[key] = format_key
-        
+
         return trans_fr, trans_rf
-        
 
     def _set(self, clipboard, format):
-        if format in [NotionType.format_key, HTMLType.format_key]:
+        if format in [type_cls.format_key for type_cls in self.type_list]:
             format = self.trans_fr[format]
         clipboard.set(format, self[format])
-        
-    def __setitem__(self, key_f, value):
-        if key_f == NotionType.format_key:
-            value = NotionType(value)
 
-        if key_f == HTMLType.format_key:
-            value = HTMLType(value)
+    def __setitem__(self, key, value):
+        key = self.trans_rf.get(key, key) # ここの配置が一番丸い initのときに呼ばれるとき以外は例外処理として第2引数が返される
+        is_processed = False
+        for type_cls in self.type_list:
+            if key == type_cls.format_key:
+                value = type_cls(value)
+                is_processed = True
+                break
 
-        elif isinstance(value, bytes):
+        if not is_processed and isinstance(value, bytes):
             value = ExtBytes(value)
-        super().__setitem__(key_f, value)
+        
+        super().__setitem__(key, value)
         return self
